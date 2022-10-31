@@ -52,7 +52,6 @@ import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -364,7 +363,7 @@ public abstract class AbstractConfig implements Serializable {
      */
     protected static Map<String, String> convert(Map<String, String> parameters, String prefix) {
         if (parameters == null || parameters.isEmpty()) {
-            return Collections.emptyMap();
+            return new HashMap<>();
         }
 
         Map<String, String> result = new HashMap<>();
@@ -1023,7 +1022,7 @@ public abstract class AbstractConfig implements Serializable {
         List<Method> methods = new ArrayList<>(beanInfo.getMethodDescriptors().length);
         for (MethodDescriptor methodDescriptor : beanInfo.getMethodDescriptors()) {
             Method method = methodDescriptor.getMethod();
-            if (MethodUtils.isGetter(method)) {
+            if (MethodUtils.isGetter(method) || isParametersGetter(method)) {
                 // filter non attribute
                 Parameter parameter = method.getAnnotation(Parameter.class);
                 if (parameter != null && !parameter.attribute()) {

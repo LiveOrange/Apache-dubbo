@@ -21,6 +21,7 @@ import org.apache.dubbo.common.extension.ExtensionAccessor;
 import org.apache.dubbo.common.extension.ExtensionAccessorAware;
 import org.apache.dubbo.common.logger.Logger;
 import org.apache.dubbo.common.logger.LoggerFactory;
+import org.apache.dubbo.common.store.DataStore;
 import org.apache.dubbo.common.threadpool.ThreadPool;
 import org.apache.dubbo.common.utils.ExecutorUtil;
 import org.apache.dubbo.common.utils.NamedThreadFactory;
@@ -40,8 +41,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 
+import static org.apache.dubbo.common.constants.CommonConstants.CONSUMER_SHARED_EXECUTOR_SERVICE_COMPONENT_KEY;
 import static org.apache.dubbo.common.constants.CommonConstants.CONSUMER_SIDE;
 import static org.apache.dubbo.common.constants.CommonConstants.DEFAULT_EXPORT_THREAD_NUM;
+import static org.apache.dubbo.common.constants.CommonConstants.DEFAULT_PROTOCOL;
 import static org.apache.dubbo.common.constants.CommonConstants.DEFAULT_REFER_THREAD_NUM;
 import static org.apache.dubbo.common.constants.CommonConstants.EXECUTOR_SERVICE_COMPONENT_KEY;
 import static org.apache.dubbo.common.constants.CommonConstants.INTERNAL_EXECUTOR_SERVICE_COMPONENT_KEY;
@@ -67,9 +70,12 @@ public class DefaultExecutorRepository implements ExecutorRepository, ExtensionA
     private final ApplicationModel applicationModel;
     private final FrameworkExecutorRepository frameworkExecutorRepository;
 
+    private final DataStore dataStore;
+
     public DefaultExecutorRepository(ApplicationModel applicationModel) {
         this.applicationModel = applicationModel;
         this.frameworkExecutorRepository = applicationModel.getFrameworkModel().getBeanFactory().getBean(FrameworkExecutorRepository.class);
+        this.dataStore = applicationModel.getExtensionLoader(DataStore.class).getDefaultExtension();
     }
 
     /**
@@ -80,11 +86,18 @@ public class DefaultExecutorRepository implements ExecutorRepository, ExtensionA
      */
     @Override
     public synchronized ExecutorService createExecutorIfAbsent(URL url) {
-        Map<Integer, ExecutorService> executors = data.computeIfAbsent(getExecutorKey(url), k -> new ConcurrentHashMap<>());
+        String executorKey = getExecutorKey(url);
+        Map<Integer, ExecutorService> executors = data.computeIfAbsent(executorKey, k -> new ConcurrentHashMap<>());
         // Consumer's executor is sharing globally, key=Integer.MAX_VALUE. Provider's executor is sharing by protocol.
         Integer portKey = CONSUMER_SIDE.equalsIgnoreCase(url.getParameter(SIDE_KEY)) ? Integer.MAX_VALUE : url.getPort();
+
+        String protocol = url.getProtocol();
+        if (StringUtils.isEmpty(protocol)) {
+            protocol = DEFAULT_PROTOCOL;
+        }
+
         if (url.getParameter(THREAD_NAME_KEY) == null) {
-            url = url.putAttribute(THREAD_NAME_KEY, "Dubbo-protocol-" + portKey);
+            url = url.putAttribute(THREAD_NAME_KEY, protocol + "-protocol-" + portKey);
         }
         URL finalUrl = url;
         ExecutorService executor = executors.computeIfAbsent(portKey, k -> createExecutor(finalUrl));
@@ -94,6 +107,8 @@ public class DefaultExecutorRepository implements ExecutorRepository, ExtensionA
             executor = createExecutor(url);
             executors.put(portKey, executor);
         }
+
+        dataStore.put(executorKey, Integer.toString(portKey), executor);
         return executor;
     }
 
@@ -110,6 +125,10 @@ public class DefaultExecutorRepository implements ExecutorRepository, ExtensionA
         if (serviceDescriptor == null) {
             executorKey = EXECUTOR_SERVICE_COMPONENT_KEY;
 
+        }
+
+        if (CONSUMER_SIDE.equalsIgnoreCase(url.getParameter(SIDE_KEY))){
+            executorKey = CONSUMER_SHARED_EXECUTOR_SERVICE_COMPONENT_KEY;
         }
         return executorKey;
     }
@@ -129,6 +148,7 @@ public class DefaultExecutorRepository implements ExecutorRepository, ExtensionA
         if (executors == null) {
             logger.warn("No available executors, this is not expected, framework should call createExecutorIfAbsent first " +
                 "before coming to here.");
+
             return null;
         }
 

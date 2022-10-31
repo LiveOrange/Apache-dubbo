@@ -18,7 +18,7 @@ package org.apache.dubbo.remoting.zookeeper.curator;
 
 import org.apache.dubbo.common.URL;
 import org.apache.dubbo.common.config.configcenter.ConfigItem;
-import org.apache.dubbo.common.logger.Logger;
+import org.apache.dubbo.common.logger.ErrorTypeAwareLogger;
 import org.apache.dubbo.common.logger.LoggerFactory;
 import org.apache.dubbo.common.utils.NamedThreadFactory;
 import org.apache.dubbo.common.utils.StringUtils;
@@ -59,11 +59,12 @@ import java.util.concurrent.TimeUnit;
 
 import static org.apache.dubbo.common.constants.CommonConstants.SESSION_KEY;
 import static org.apache.dubbo.common.constants.CommonConstants.TIMEOUT_KEY;
+import static org.apache.dubbo.common.constants.LoggerCodeConstants.CONFIG_FAILED_CONNECT_REGISTRY;
 
 
 public class CuratorZookeeperClient extends AbstractZookeeperClient<CuratorZookeeperClient.NodeCacheListenerImpl, CuratorZookeeperClient.CuratorWatcherImpl> {
 
-    protected static final Logger logger = LoggerFactory.getLogger(CuratorZookeeperClient.class);
+    protected static final ErrorTypeAwareLogger logger = LoggerFactory.getErrorTypeAwareLogger(CuratorZookeeperClient.class);
 
     private static final Charset CHARSET = StandardCharsets.UTF_8;
     private final CuratorFramework client;
@@ -97,10 +98,18 @@ public class CuratorZookeeperClient extends AbstractZookeeperClient<CuratorZooke
             client = builder.build();
             client.getConnectionStateListenable().addListener(new CuratorConnectionStateListener(url));
             client.start();
+
             boolean connected = client.blockUntilConnected(timeout, TimeUnit.MILLISECONDS);
             if (!connected) {
-                throw new IllegalStateException("zookeeper not connected");
+                IllegalStateException illegalStateException = new IllegalStateException("zookeeper not connected");
+
+                // 5-1 Failed to connect to configuration center.
+                logger.error(CONFIG_FAILED_CONNECT_REGISTRY, "Zookeeper server offline", "",
+                    "Failed to connect with zookeeper", illegalStateException);
+
+                throw illegalStateException;
             }
+
             CuratorWatcherImpl.closed = false;
         } catch (Exception e) {
             close();
